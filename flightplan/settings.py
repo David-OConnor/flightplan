@@ -40,6 +40,7 @@ INSTALLED_APPS = (
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'south',
     'diverts',
 )
 
@@ -61,7 +62,7 @@ WSGI_APPLICATION = 'flightplan.wsgi.application'
 # https://docs.djangoproject.com/en/1.6/ref/settings/#databases
 # This if/else prevents loading the .gitignored private file if on Heroku.
 
-LOCAL_DB = 'postgres://dave:test@localhost:5433/flightplan'
+LOCAL_DB = 'postgres://postgres:test@localhost:5432/flightplan'
 DATABASES = {'default': dj_database_url.config(default=LOCAL_DB)}
 
 # For connecting to Heroku's database from a local machine.

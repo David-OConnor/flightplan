@@ -4,12 +4,79 @@ import zipfile
 
 import requests
 
-from diverts.models import Airfield, Navaid
+from diverts.models import Airfield, Runway, Navaid
 
+
+#todo allow for bearing/dist cuts from navaids in flightplan
 
 DIR = os.path.dirname(__file__)
 DIR_RES = os.path.abspath(os.path.join(DIR, 'resources'))
 
+
+
+def parse_lat_lon(lat_lon: ET.Element) -> (float, float):
+    """Remove the extended 'aixm' tag, leaving only 'Navaid', 'VOR' etc."""
+    lat_lon = lat_lon[0].text.split(' ')
+    lat = float(lat_lon[0])
+    lon = float(lat_lon[1])
+    return lat, lon
+
+
+def populate_airfields(filename):
+    aixm = '{http://www.aixm.aero/schema/5.1}'  # make these global?
+    gml = '{http://www.opengis.net/gml/3.2}'
+
+    tree = ET.parse(os.path.join(DIR_RES, filename))
+    root = tree.getroot()
+
+    # tags: AirportHeliport, OrganisationAuthority, Unit, RadioCommunicationChannel,
+    # AirTrafficControlService, Runway, RunwayMarking, TouchDownLiftOff,
+    # RunwayDirection, Glidepath, AIrportSuppliesService,
+
+    for child in root:
+        if child[0].tag == '{0}AirportHeliport'.format(aixm):
+            ident = child.findall(".//{0}timeSlice//{0}designator".format(aixm))
+            name = child.findall(".//{0}timeSlice//{0}name".format(aixm))
+            control = child.findall(".//{0}timeSlice//{0}controlType".format(aixm))
+            lat_lon = child.findall(".//{0}pos".format(gml))
+
+
+
+            ident = ident[0].text
+            name = name[0].text
+            try:
+                control = control[0].text
+            except IndexError:
+                control = ''
+            lat, lon = parse_lat_lon(lat_lon)
+
+            yield("airfield", ident, name, control, lat, lon)
+
+            #
+            # a = Airfield(ident=ident, lat=lat, lon=lon, runways=runways)
+            # a.save()
+
+        elif child[0].tag == '{0}Runway'.format(aixm):
+            airfield_id = child.findall(".//{0}timeSlice//{0}associatedAirportHeliport".format(aixm))
+            # airfield = Airfield('asfd')
+            number = child.findall(".//{0}timeSlice//{0}designator".format(aixm))
+            length = child.findall(".//{0}timeSlice//{0}lengthStrip".format(aixm))
+            width = child.findall(".//{0}timeSlice//{0}widthStrip".format(aixm))
+
+            # Parses a dict with one k/v. We only care about the v.
+            airfield_id = list(airfield_id[0].attrib.values())[0]
+            airfield_id = airfield_id.split("'")[1]
+
+
+            number = number[0].text
+            length = int(length[0].text)
+            width = int(width[0].text)
+
+            yield("rwy", airfield, number, length, width)
+
+            # r = Runway(airfield=airfield, number=number, length=length,
+            #            width=width, heading=heading)
+            # r.save()
 
 
 def populate_navaids(filename):
@@ -24,22 +91,12 @@ def populate_navaids(filename):
 
     possible_components = ['VOR', 'TACAN', 'DME', 'NDB']
 
-    navaid_cats = [
-        '{0}Navaid'.format(aixm),
-        '{0}VOR'.format(aixm),
-        '{0}TACAN'.format(aixm),
-        '{0}DME'.format(aixm),
-        '{0}NDB'.format(aixm)
-    ]
-
-    navaid_cats = ['{0}Navaid'.format(aixm)]
-
     tree = ET.parse(os.path.join(DIR_RES, filename))
     root = tree.getroot()
 
     for child in root:
         # Skip non-navaid entries, like information services and org authorities.
-        if child[0].tag not in navaid_cats:
+        if child[0].tag != '{0}Navaid'.format(aixm):
             continue
 
         ident = child.findall(".//{0}timeSlice//{0}designator".format(aixm))
@@ -52,50 +109,29 @@ def populate_navaids(filename):
         comps = []
         equipment = child.findall(".//{0}theNavaidEquipment".format(aixm))
         for equip in equipment:
-            # Returns a dict with one k/v. We only care about the v.
-            id_ = equip.attrib
-            id_ = list(id_.values())[0]
+            # Parses a dict with one k/v. We only care about the v.
+            comp_id = list(equip.attrib.values())[0]
 
             for comp in possible_components:
-                if comp in id_:
+                if comp in comp_id:
                     comps.append(comp)
-
+        # The later chunk of the admin file switches to localizers/glidepaths
+        # etc, and still refers to them as Navaids.  They won't have idents, names,
+        # elevated point coords etc.  Skip them. Error checking on the ident is
+        # good enough.
         try:
             ident = ident[0].text
         except IndexError:
-            ident = ''
+            continue
 
-        try:
-            name = name[0].text
-        except IndexError:
-            name = ''
+        name = name[0].text
 
-        # Remove the extended 'aixm' tag, leaving only 'Navaid', 'VOR' etc.
-        # category = child[0].tag.split('}')[1]
-
-        try:
-            lat_lon = lat_lon[0].text
-            split = lat_lon.split(' ')
-            lat = float(split[0])
-            lon = float(split[1])
-        except IndexError:
-            lat = 0
-            lon = 0
+        lat, lon = parse_lat_lon(lat_lon)
 
 
-
-        yield (ident, name, comps, lat, lon)  # temp
-
-        n = Navaid(ident=ident, lat=lat, lon=lon)
+        # yield (ident, name, comps, lat, lon)  # temp
+        n = Navaid(ident=ident, name=name, components=comps, lat=lat, lon=lon)
         n.save()
-
-
-def parse_xml_with_keys(pefix, *keys):
-    pass
-
-
-
-
 
 
 
@@ -112,15 +148,3 @@ def download_data():
         myzip.write()
 
         # move to database
-
-
-
-
-#order:
-#NAvaid,
-#Org auth
-#ndb
-#dme
-#rcc
-#is
-

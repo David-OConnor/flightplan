@@ -23,6 +23,7 @@ def parse_lat_lon(lat_lon: ET.Element) -> (float, float):
 
 
 def populate_airfields(filename):
+    #todo do I need to filter tby timeslice, or can Icut it out?
     aixm = '{http://www.aixm.aero/schema/5.1}'  # make these global?
     gml = '{http://www.opengis.net/gml/3.2}'
 
@@ -40,8 +41,6 @@ def populate_airfields(filename):
             control = child.findall(".//{0}timeSlice//{0}controlType".format(aixm))
             lat_lon = child.findall(".//{0}pos".format(gml))
 
-
-
             ident = ident[0].text
             name = name[0].text
             try:
@@ -50,11 +49,10 @@ def populate_airfields(filename):
                 control = ''
             lat, lon = parse_lat_lon(lat_lon)
 
-            yield("airfield", ident, name, control, lat, lon)
+            # yield("airfield", ident, name, control, lat, lon)
 
-            #
-            # a = Airfield(ident=ident, lat=lat, lon=lon, runways=runways)
-            # a.save()
+            a = Airfield(ident=ident, name=name, control=control, lat=lat, lon=lon)
+            a.save()
 
         elif child[0].tag == '{0}Runway'.format(aixm):
             airfield_id = child.findall(".//{0}timeSlice//{0}associatedAirportHeliport".format(aixm))
@@ -64,19 +62,29 @@ def populate_airfields(filename):
             width = child.findall(".//{0}timeSlice//{0}widthStrip".format(aixm))
 
             # Parses a dict with one k/v. We only care about the v.
+            # airfield_id is the internal AIXM id, ie 'AH_0000001'. airfield_ident
+            # is the airfield identifier, ie 'ADK'.
             airfield_id = list(airfield_id[0].attrib.values())[0]
             airfield_id = airfield_id.split("'")[1]
-
+            airfield_elem = root.findall(
+                ".//{0}AirportHeliport[@{1}id='{2}']".format(aixm, gml, airfield_id))
+            airfield_ident = airfield_elem[0].findall(".//{0}designator".format(aixm))[0].text
+            airfield = Airfield.objects.get(ident=airfield_ident)
 
             number = number[0].text
-            length = int(length[0].text)
-            width = int(width[0].text)
 
-            yield("rwy", airfield, number, length, width)
+            # Temp code - ruways show as '5/23', then separate entries for 5 and
+            # 23. Only the'5/23' entry has length and width
+            try:
+                length = int(length[0].text)
+                width = int(width[0].text)
+            except IndexError:
+                continue
 
-            # r = Runway(airfield=airfield, number=number, length=length,
-            #            width=width, heading=heading)
-            # r.save()
+            # yield("rwy", airfield_id, number, length, width)
+
+            r = Runway(airfield=airfield, number=number, length=length, width=width)
+            r.save()
 
 
 def populate_navaids(filename):

@@ -9,6 +9,9 @@ class Navaid(models.Model):
     lon = models.FloatField()
     #tac_freq = models.CharField()
 
+    def __str__(self):
+        return self.ident
+
 
 class Airfield(models.Model):
     ident = models.CharField(max_length=6, primary_key=True)
@@ -16,18 +19,24 @@ class Airfield(models.Model):
     control = models.CharField(max_length=100)  #'CIVIL', or ... MILITARY?
     lat = models.FloatField()
     lon = models.FloatField()
+
+    def __str__(self):
+        return self.ident
     
     #runways = models.CharField(max_length=500) # serialized as json. {'8-26': 8000, ...}
-    runways = models.ManyToManyField('Runway', related_name='airfield_rwys')  #figure out what related name should be
+    #runways = models.ManyToManyField('Runway', related_name='airfield_rwys')  #figure out what related name should be
     #services = models.CharField(max_length=500)
 
 
 class Runway(models.Model):
     # Single direction? Ie two entries for rwy 08-26
-    airfield = models.ForeignKey('Airfield')
+    airfield = models.ForeignKey(Airfield)
     number = models.CharField(max_length=50)  # ie '04/26' or '04'
     length = models.IntegerField()  # feet
     width= models.IntegerField()  # feet
+
+    def __str__(self):
+        return str(self.airfield) + ' ' + self.number
 
 
 class Services(models.Model):

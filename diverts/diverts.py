@@ -12,54 +12,61 @@ from diverts.models import Airfield, Runway, Navaid
 DIR = os.path.dirname(__file__)
 DIR_RES = os.path.abspath(os.path.join(DIR, 'resources'))
 
+aixm = '{http://www.aixm.aero/schema/5.1}'  # make these global?
+gml = '{http://www.opengis.net/gml/3.2}'
+faa = '{http://www.faa.gov/aixm5.1}'  # set these dynamically
 
 
-def parse_lat_lon(lat_lon: ET.Element) -> (float, float):
+def parse_lon_lat(lon_lat: ET.Element) -> (float, float):
     """Remove the extended 'aixm' tag, leaving only 'Navaid', 'VOR' etc."""
-    lat_lon = lat_lon[0].text.split(' ')
-    lat = float(lat_lon[0])
-    lon = float(lat_lon[1])
+    lon_lat = lon_lat[0].text.split(' ')
+    lon = float(lon_lat[0])
+    lat = float(lon_lat[1])
     return lat, lon
 
 
 def populate_airfields(filename):
-    #todo do I need to filter tby timeslice, or can Icut it out?
-    aixm = '{http://www.aixm.aero/schema/5.1}'  # make these global?
-    gml = '{http://www.opengis.net/gml/3.2}'
+    """Save relevant airfield information to the database, from an AIXM xml file."""
 
     tree = ET.parse(os.path.join(DIR_RES, filename))
     root = tree.getroot()
 
     # tags: AirportHeliport, OrganisationAuthority, Unit, RadioCommunicationChannel,
     # AirTrafficControlService, Runway, RunwayMarking, TouchDownLiftOff,
-    # RunwayDirection, Glidepath, AIrportSuppliesService,
+    # RunwayDirection, Glidepath, AirportSuppliesService,
 
     for child in root:
         if child[0].tag == '{0}AirportHeliport'.format(aixm):
-            ident = child.findall(".//{0}timeSlice//{0}designator".format(aixm))
-            name = child.findall(".//{0}timeSlice//{0}name".format(aixm))
-            control = child.findall(".//{0}timeSlice//{0}controlType".format(aixm))
-            lat_lon = child.findall(".//{0}pos".format(gml))
+            ident = child.findall(".//{0}designator".format(aixm))
+            name = child.findall(".//{0}name".format(aixm))
+            lon_lat = child.findall(".//{0}pos".format(gml))
 
             ident = ident[0].text
             name = name[0].text
-            try:
-                control = control[0].text
-            except IndexError:
-                control = ''
-            lat, lon = parse_lat_lon(lat_lon)
 
-            # yield("airfield", ident, name, control, lat, lon)
+            lat, lon = parse_lon_lat(lon_lat)
 
-            a = Airfield(ident=ident, name=name, control=control, lat=lat, lon=lon)
+            # yield("airfield", ident, name, lat, lon)
+
+            a = Airfield(ident=ident, name=name, lat=lat, lon=lon)
             a.save()
 
-        elif child[0].tag == '{0}Runway'.format(aixm):
-            airfield_id = child.findall(".//{0}timeSlice//{0}associatedAirportHeliport".format(aixm))
-            # airfield = Airfield('asfd')
-            number = child.findall(".//{0}timeSlice//{0}designator".format(aixm))
-            length = child.findall(".//{0}timeSlice//{0}lengthStrip".format(aixm))
-            width = child.findall(".//{0}timeSlice//{0}widthStrip".format(aixm))
+
+def populate_runways(filename):
+    """Save relevant runway information to the database, from an AIXM xml file."""
+    # Uses the same AIXM file as airfields (APT_AIXM.xml)
+    # Must be run after populate_airfields, or the Airfield foreign keys won't
+    # have anything to relate to.
+
+    tree = ET.parse(os.path.join(DIR_RES, filename))
+    root = tree.getroot()
+
+    for child in root:
+        if child[0].tag == '{0}Runway'.format(aixm):
+            airfield_id = child.findall(".//{0}associatedAirportHeliport".format(aixm))
+            number = child.findall(".//{0}designator".format(aixm))
+            length = child.findall(".//{0}lengthStrip".format(aixm))
+            width = child.findall(".//{0}widthStrip".format(aixm))
 
             # Parses a dict with one k/v. We only care about the v.
             # airfield_id is the internal AIXM id, ie 'AH_0000001'. airfield_ident
@@ -73,7 +80,7 @@ def populate_airfields(filename):
 
             number = number[0].text
 
-            # Temp code - ruways show as '5/23', then separate entries for 5 and
+            # Ruways show as '5/23', then separate entries for 5 and
             # 23. Only the'5/23' entry has length and width
             try:
                 length = int(length[0].text)
@@ -88,10 +95,7 @@ def populate_airfields(filename):
 
 
 def populate_navaids(filename):
-    """placeholder"""
-    faa = '{http://www.faa.gov/aixm5.1}'  # set these dynamically
-    aixm = '{http://www.aixm.aero/schema/5.1}'
-    gml = '{http://www.opengis.net/gml/3.2}'
+    """Save relevant navaid information to the database, from an AIXM xml file."""
 
     # The source document appears to include navaids, organizational authorities,
     # DMEs, NDBs, VORs, TACANs and Information Services, and radio communication channels.
@@ -107,15 +111,16 @@ def populate_navaids(filename):
         if child[0].tag != '{0}Navaid'.format(aixm):
             continue
 
-        ident = child.findall(".//{0}timeSlice//{0}designator".format(aixm))
-        name = child.findall(".//{0}timeSlice//{0}name".format(aixm))
-        lat_lon = child.findall(".//{0}pos".format(gml))
+        ident = child.findall(".//{0}designator".format(aixm))
+        name = child.findall(".//{0}name".format(aixm))
+        lon_lat = child.findall(".//{0}pos".format(gml))
+        equipment = child.findall(".//{0}theNavaidEquipment".format(aixm))
 
         # This method seems messy, but avoids finding the separate top-level
         # component, and pulling data from it. We only need the types of components
         # per Navaid.
         comps = []
-        equipment = child.findall(".//{0}theNavaidEquipment".format(aixm))
+
         for equip in equipment:
             # Parses a dict with one k/v. We only care about the v.
             comp_id = list(equip.attrib.values())[0]
@@ -134,13 +139,18 @@ def populate_navaids(filename):
 
         name = name[0].text
 
-        lat, lon = parse_lat_lon(lat_lon)
+        lat, lon = parse_lon_lat(lon_lat)
 
 
         # yield (ident, name, comps, lat, lon)  # temp
         n = Navaid(ident=ident, name=name, components=comps, lat=lat, lon=lon)
         n.save()
 
+
+def populate_all():
+    populate_navaids('NAV_AIXM.xml')
+    populate_airfields('APT_AIXM.xml')
+    populate_runways('APT_AIXM.xml')
 
 
 def download_data():

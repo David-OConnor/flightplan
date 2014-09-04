@@ -10,7 +10,7 @@ class AirfieldAdmin(admin.ModelAdmin):
 
 class RunwayAdmin(admin.ModelAdmin):
     list_display = ('airfield', 'number', 'length', 'width')
-    search_fields = ['airfield']
+    search_fields = ['airfield__ident']
 
 
 class NavaidAdmin(admin.ModelAdmin):

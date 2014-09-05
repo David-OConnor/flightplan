@@ -15,7 +15,9 @@ class Navaid(models.Model):
 
 class Airfield(models.Model):
     ident = models.CharField(max_length=6, primary_key=True)
-    name = models.CharField(max_length=100)  #todo implement name after resetting db or migration etc
+    # The AIXM unique identifier, used for tieing runways to airfields.
+    aixm_id = models.CharField(max_length=30)
+    name = models.CharField(max_length=100)
     # control = models.CharField(max_length=100)  #'CIVIL', or ... MILITARY?  #todo remove this
     lat = models.FloatField()
     lon = models.FloatField()

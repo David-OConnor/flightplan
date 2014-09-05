@@ -4,5 +4,3 @@ dj-static
 django-toolbelt
 gunicorn
 psycopg2
-static3
-wsgiref

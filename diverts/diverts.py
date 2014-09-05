@@ -37,18 +37,20 @@ def populate_airfields(filename):
 
     for child in root:
         if child[0].tag == '{0}AirportHeliport'.format(aixm):
-            ident = child.findall(".//{0}designator".format(aixm))
-            name = child.findall(".//{0}name".format(aixm))
-            lon_lat = child.findall(".//{0}pos".format(gml))
+            ident = child.findall("./{0}AirportHeliport/{0}timeSlice/{0}AirportHeliportTimeSlice/{0}designator".format(aixm))
+            name = child.findall("./{0}AirportHeliport/{0}timeSlice/{0}AirportHeliportTimeSlice/{0}name".format(aixm))
+            lon_lat = child.findall("./{0}AirportHeliport/{0}timeSlice/{0}AirportHeliportTimeSlice/{0}ARP/{0}ElevatedPoint/{1}pos".format(aixm, gml))
+            aixm_id = child.findall("./{0}AirportHeliport".format(aixm))
 
             ident = ident[0].text
             name = name[0].text
+            aixm_id = list(aixm_id[0].attrib.values())[0]
 
             lat, lon = parse_lon_lat(lon_lat)
 
             # yield("airfield", ident, name, lat, lon)
 
-            a = Airfield(ident=ident, name=name, lat=lat, lon=lon)
+            a = Airfield(ident=ident, name=name, aixm_id=aixm_id, lat=lat, lon=lon)
             a.save()
 
 
@@ -63,20 +65,22 @@ def populate_runways(filename):
 
     for child in root:
         if child[0].tag == '{0}Runway'.format(aixm):
-            airfield_id = child.findall(".//{0}associatedAirportHeliport".format(aixm))
-            number = child.findall(".//{0}designator".format(aixm))
-            length = child.findall(".//{0}lengthStrip".format(aixm))
-            width = child.findall(".//{0}widthStrip".format(aixm))
+            aixm_id = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}associatedAirportHeliport".format(aixm))
+            number = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}designator".format(aixm))
+            length = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}lengthStrip".format(aixm))
+            width = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}widthStrip".format(aixm))
 
             # Parses a dict with one k/v. We only care about the v.
             # airfield_id is the internal AIXM id, ie 'AH_0000001'. airfield_ident
             # is the airfield identifier, ie 'ADK'.
-            airfield_id = list(airfield_id[0].attrib.values())[0]
-            airfield_id = airfield_id.split("'")[1]
-            airfield_elem = root.findall(
-                ".//{0}AirportHeliport[@{1}id='{2}']".format(aixm, gml, airfield_id))
-            airfield_ident = airfield_elem[0].findall(".//{0}designator".format(aixm))[0].text
-            airfield = Airfield.objects.get(ident=airfield_ident)
+            aixm_id = list(aixm_id[0].attrib.values())[0]
+            aixm_id = aixm_id.split("'")[1]
+
+            #todo this is the only line that makes it slow!
+            # airfield_elem = root.findall("./{3}Member/{0}AirportHeliport[@{1}id='{2}']".format(aixm, gml, aixm_id, faa))
+
+            # airfield_ident = airfield_elem[0].findall(".//{0}designator".format(aixm))[0].text
+            airfield = Airfield.objects.get(aixm_id=aixm_id)
 
             number = number[0].text
 
@@ -111,10 +115,15 @@ def populate_navaids(filename):
         if child[0].tag != '{0}Navaid'.format(aixm):
             continue
 
-        ident = child.findall(".//{0}designator".format(aixm))
-        name = child.findall(".//{0}name".format(aixm))
-        lon_lat = child.findall(".//{0}pos".format(gml))
-        equipment = child.findall(".//{0}theNavaidEquipment".format(aixm))
+        # ident = child.findall(".//{0}designator".format(aixm))
+        # name = child.findall(".//{0}name".format(aixm))
+        # lon_lat = child.findall(".//{0}pos".format(gml))
+        # equipment = child.findall(".//{0}theNavaidEquipment".format(aixm))
+
+        ident = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}designator".format(aixm))
+        name = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}name".format(aixm))
+        lon_lat = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}location/{0}ElevatedPoint/{1}pos".format(aixm, gml))
+        equipment = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}navaidEquipment/{0}NavaidComponent/{0}theNavaidEquipment".format(aixm))
 
         # This method seems messy, but avoids finding the separate top-level
         # component, and pulling data from it. We only need the types of components
@@ -140,7 +149,6 @@ def populate_navaids(filename):
         name = name[0].text
 
         lat, lon = parse_lon_lat(lon_lat)
-
 
         # yield (ident, name, comps, lat, lon)  # temp
         n = Navaid(ident=ident, name=name, components=comps, lat=lat, lon=lon)

@@ -1,3 +1,4 @@
+from math import sin, asin, cos, acos, atan2, sqrt, radians, pi
 import os
 import xml.etree.ElementTree as ET
 import zipfile
@@ -7,14 +8,148 @@ import requests
 from diverts.models import Airfield, Runway, Navaid
 
 
+tau = pi * 2
+
 #todo allow for bearing/dist cuts from navaids in flightplan
 
 DIR = os.path.dirname(__file__)
 DIR_RES = os.path.abspath(os.path.join(DIR, 'resources'))
 
-aixm = '{http://www.aixm.aero/schema/5.1}'  # make these global?
+aixm = '{http://www.aixm.aero/schema/5.1}'
 gml = '{http://www.opengis.net/gml/3.2}'
 faa = '{http://www.faa.gov/aixm5.1}'  # set these dynamically
+
+
+#todo clean up repetatively calculating earth's radius
+
+def ellipsoid_radius(f):
+    # todo add this to shared_funcs
+    #todo make shared_funcs its own module called geodesic
+    #todo in shared funcs, switch to NM or nmi.
+    # This doesn't quite match with Wolfram Alpha's results, but is closer
+    # than using an average radius.
+    # f is geodetic latitude, in degrees
+    f = radians(f)
+    a = 6378137.0  # m, per WGS84
+    b = 6356752.31424518  # m, per WGS84
+    #1/f = 298.257223563
+
+    NM_per_m = .000539956803
+    a, b = a * NM_per_m, b * NM_per_m
+
+    return sqrt(((a**2 * cos(f))**2 + (b**2 * sin(f))**2) / ((a * cos(f))**2 + (b * sin(f))**2))
+
+
+def find_brg(point0, point1):
+    #todo copy+pasted from shared_funcs.py
+    #todo: in shared_funcs.py, changed from a list to two separate args, like this is now.
+    #todo ie replace it with this.
+    """Find the bearing, in radians, between two points."""
+    lat0 = radians(point0[0])
+    lon0 = radians(point0[1])
+    lat1 = radians(point1[0])
+    lon1 = radians(point1[1])
+    d_lon = lon1 - lon0
+
+    brg = atan2(sin(d_lon)*cos(lat1), cos(lat0)*sin(lat1) - sin(lat0)*cos(lat1)*cos(d_lon))
+    return (brg + tau) % tau
+
+
+def cross_track_dist(point0: (float, float), point1: (float, float), third_point: (float, float)):
+    #todo comment and clean this function.
+    r = ellipsoid_radius(third_point[0])
+
+    dist_start_third = find_dist(point0, third_point)
+    dist_end_third = find_dist(point1, third_point)
+    dist_start_end = find_dist(point0, point1)
+
+    angular_start_third = (dist_start_third / (tau*r)) * tau
+    angular_end_third = (dist_end_third / (tau*r)) * tau
+
+    brg_start_third = find_brg(point0, third_point)
+    brg_start_end = find_brg(point0, point1)
+
+    cross_track = asin(sin(angular_start_third) * sin(brg_start_third - brg_start_end)) * r
+    ang_ct = (cross_track / (tau*r)) * tau
+
+    at_start = acos(cos(angular_start_third) / cos(ang_ct)) * r
+    at_end = acos(cos(angular_end_third) / cos(ang_ct)) * r
+
+    if at_start > dist_start_end:
+        cross_track = find_dist(point1, third_point)
+    elif at_end > dist_start_end:
+        cross_track = find_dist(point0, third_point)
+
+    return abs(cross_track)
+
+
+def find_dist(point0: (float, float), point1: (float, float)):
+    """Calculate the distance between two lat-lons, in nm.  Inputs are in degrees."""
+    # todo add this to squadron's shared_funcs.py.
+    lat0, lon0 = radians(point0[0]), radians(point0[1])
+    lat1, lon1 = radians(point1[0]), radians(point1[1])
+    r = ellipsoid_radius(lat0)
+
+    dlon = lon1 - lon0
+    dlat = lat1 - lat0
+
+    a = (sin(dlat/2)) ** 2 + cos(lat0) * cos(lat1) * (sin(dlon/2)) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    return r * c
+
+
+def find_diverts(flight_path: list, max_dist: int, min_rwy_len: int) -> list:
+    """Find divert airfields within a certain distance of the flight path that meet
+    certain criteria, like min runway length."""
+    path_points = []
+    for ident in flight_path:
+        navaid = Navaid.objects.get(ident=ident.upper())
+        path_points.append((navaid.lat, navaid.lon))
+
+    passed_rwy_len = Airfield.objects.filter(runway__length__gte=min_rwy_len)
+
+    result = []
+
+    for airfield in passed_rwy_len:
+        airfield_point = (airfield.lat, airfield.lon)
+        if path_point_proximity(path_points, airfield_point, max_dist):
+            result.append(airfield)
+            print(airfield.name, "point")
+            continue
+
+        if leg_proximity(path_points, airfield_point, max_dist):
+            print(airfield.name, "leg")
+            result.append(airfield)
+
+    return result
+
+
+def path_point_proximity(path_points, airfield_point, max_dist):
+    for path_point in path_points:
+        if find_dist(path_point, airfield_point) <= max_dist:
+            return True
+    return False
+
+
+def leg_proximity(path_points, airfield_point, max_dist):
+    legs = find_legs(path_points)
+    for leg in legs:
+        if cross_track_dist(leg[0], leg[1], airfield_point) <= max_dist:
+            return True
+    return False
+
+
+def find_legs(path_points: list):
+    """Return a list of tuples of points defining the start and end of each
+    leg on a flight path."""
+    if len(path_points) < 2:
+        return
+
+    result = [(path_points[0], path_points[1])]
+    for point in path_points[1: -1]:
+        result.append((point, path_points[path_points.index(point) + 1]))
+
+    return result
 
 
 def parse_lon_lat(lon_lat: ET.Element) -> (float, float):
@@ -23,6 +158,14 @@ def parse_lon_lat(lon_lat: ET.Element) -> (float, float):
     lon = float(lon_lat[0])
     lat = float(lon_lat[1])
     return lat, lon
+
+
+def aixm_keys(element, keys: tuple):
+    """Provides a cleaner API for parsing XML than creating the xpath strings manually."""
+    path = '.'
+    for key in keys:
+        path += '/' + aixm + key
+    return element.findall(path)
 
 
 def populate_airfields(filename):
@@ -37,18 +180,16 @@ def populate_airfields(filename):
 
     for child in root:
         if child[0].tag == '{0}AirportHeliport'.format(aixm):
-            ident = child.findall("./{0}AirportHeliport/{0}timeSlice/{0}AirportHeliportTimeSlice/{0}designator".format(aixm))
-            name = child.findall("./{0}AirportHeliport/{0}timeSlice/{0}AirportHeliportTimeSlice/{0}name".format(aixm))
+            ident = aixm_keys(child, ('AirportHeliport', 'timeSlice', 'AirportHeliportTimeSlice', 'designator'))
+            name = aixm_keys(child, ('AirportHeliport', 'timeSlice', 'AirportHeliportTimeSlice', 'name'))
             lon_lat = child.findall("./{0}AirportHeliport/{0}timeSlice/{0}AirportHeliportTimeSlice/{0}ARP/{0}ElevatedPoint/{1}pos".format(aixm, gml))
-            aixm_id = child.findall("./{0}AirportHeliport".format(aixm))
+            aixm_id = aixm_keys(child, ('AirportHeliport',))
 
             ident = ident[0].text
             name = name[0].text
             aixm_id = list(aixm_id[0].attrib.values())[0]
 
             lat, lon = parse_lon_lat(lon_lat)
-
-            # yield("airfield", ident, name, lat, lon)
 
             a = Airfield(ident=ident, name=name, aixm_id=aixm_id, lat=lat, lon=lon)
             a.save()
@@ -65,10 +206,10 @@ def populate_runways(filename):
 
     for child in root:
         if child[0].tag == '{0}Runway'.format(aixm):
-            aixm_id = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}associatedAirportHeliport".format(aixm))
-            number = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}designator".format(aixm))
-            length = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}lengthStrip".format(aixm))
-            width = child.findall("./{0}Runway/{0}timeSlice/{0}RunwayTimeSlice/{0}widthStrip".format(aixm))
+            aixm_id = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'associatedAirportHeliport'))
+            number = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'designator'))
+            length = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'lengthStrip'))
+            width = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'widthStrip'))
 
             # Parses a dict with one k/v. We only care about the v.
             # airfield_id is the internal AIXM id, ie 'AH_0000001'. airfield_ident
@@ -91,8 +232,6 @@ def populate_runways(filename):
                 width = int(width[0].text)
             except IndexError:
                 continue
-
-            # yield("rwy", airfield_id, number, length, width)
 
             r = Runway(airfield=airfield, number=number, length=length, width=width)
             r.save()
@@ -120,10 +259,10 @@ def populate_navaids(filename):
         # lon_lat = child.findall(".//{0}pos".format(gml))
         # equipment = child.findall(".//{0}theNavaidEquipment".format(aixm))
 
-        ident = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}designator".format(aixm))
-        name = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}name".format(aixm))
+        ident = aixm_keys(child, ('Navaid', 'timeSlice', 'NavaidTimeSlice', 'designator'))
+        name = aixm_keys(child, ('Navaid', 'timeSlice', 'NavaidTimeSlice', 'name'))
         lon_lat = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}location/{0}ElevatedPoint/{1}pos".format(aixm, gml))
-        equipment = child.findall("./{0}Navaid/{0}timeSlice/{0}NavaidTimeSlice/{0}navaidEquipment/{0}NavaidComponent/{0}theNavaidEquipment".format(aixm))
+        equipment = aixm_keys(child, ('Navaid', 'timeSlice', 'NavaidTimeSlice', 'navaidEquipment', 'NavaidComponent', 'theNavaidEquipment'))
 
         # This method seems messy, but avoids finding the separate top-level
         # component, and pulling data from it. We only need the types of components
@@ -147,10 +286,8 @@ def populate_navaids(filename):
             continue
 
         name = name[0].text
-
         lat, lon = parse_lon_lat(lon_lat)
 
-        # yield (ident, name, comps, lat, lon)  # temp
         n = Navaid(ident=ident, name=name, components=comps, lat=lat, lon=lon)
         n.save()
 

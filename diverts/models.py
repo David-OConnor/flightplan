@@ -18,12 +18,11 @@ class Airfield(models.Model):
     # The AIXM unique identifier, used for tieing runways to airfields.
     aixm_id = models.CharField(max_length=30)
     name = models.CharField(max_length=100)
-    # control = models.CharField(max_length=100)  #'CIVIL', or ... MILITARY?  #todo remove this
     lat = models.FloatField()
     lon = models.FloatField()
 
     def __str__(self):
-        return self.ident
+        return self.ident + self.name
     
     #services = models.CharField(max_length=500)
 

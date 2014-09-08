@@ -5,7 +5,7 @@ import zipfile
 
 import requests
 
-from diverts.models import Airfield, Runway, Navaid
+from diverts.models import Airfield, Runway, Navaid, Fix
 
 
 tau = pi * 2
@@ -101,17 +101,28 @@ def find_dist(point0: (float, float), point1: (float, float)):
 def find_diverts(flight_path: list, max_dist: int, min_rwy_len: int) -> list:
     """Find divert airfields within a certain distance of the flight path that meet
     certain criteria, like min runway length."""
+
+    #Todo add the k etc for airfield
     path_points = []
     for ident in flight_path:
-        navaid = Navaid.objects.get(ident=ident.upper())
-        path_points.append((navaid.lat, navaid.lon))
+        if len(ident) == 3:
+            pt = Navaid.objects.get(ident=ident.upper())
+        elif len(ident) == 4:
+            pt = Airfield.objects.get(ident=ident.upper())
+        elif len(ident) == 5:
+            pt = Fix.objects.get(ident=ident.upper())
+        else:
+            raise TypeError('Steer point has too few or too many characters.')
+
+        path_points.append((pt.lat, pt.lon))
 
     passed_rwy_len = Airfield.objects.filter(runway__length__gte=min_rwy_len).distinct()
 
     result = []
-
+    print("TEST")
     for airfield in passed_rwy_len:
         airfield_point = (airfield.lat, airfield.lon)
+        #this bit shouldn't be necessary, as leg proximity includes it. Still sometimes coming ssort.
         if path_point_proximity(path_points, airfield_point, max_dist):
             result.append(airfield)
             continue
@@ -167,7 +178,8 @@ def aixm_keys(element, keys: tuple):
 
 
 def populate_airfields(filename):
-    """Save relevant airfield information to the database, from an AIXM xml file."""
+    """Save relevant airfield information to the database, from an AIXM xml file.
+    Uses APT_AIXM.xml"""
 
     tree = ET.parse(os.path.join(DIR_RES, filename))
     root = tree.getroot()
@@ -194,7 +206,8 @@ def populate_airfields(filename):
 
 
 def populate_runways(filename):
-    """Save relevant runway information to the database, from an AIXM xml file."""
+    """Save relevant runway information to the database, from an AIXM xml file.
+    Uses APT_AIXM.xml."""
     # Uses the same AIXM file as airfields (APT_AIXM.xml)
     # Must be run after populate_airfields, or the Airfield foreign keys won't
     # have anything to relate to.
@@ -236,7 +249,8 @@ def populate_runways(filename):
 
 
 def populate_navaids(filename):
-    """Save relevant navaid information to the database, from an AIXM xml file."""
+    """Save relevant navaid information to the database, from an AIXM xml file.
+    Uses NAV_AIXM.xml."""
 
     # The source document appears to include navaids, organizational authorities,
     # DMEs, NDBs, VORs, TACANs and Information Services, and radio communication channels.
@@ -251,11 +265,6 @@ def populate_navaids(filename):
         # Skip non-navaid entries, like information services and org authorities.
         if child[0].tag != '{0}Navaid'.format(aixm):
             continue
-
-        # ident = child.findall(".//{0}designator".format(aixm))
-        # name = child.findall(".//{0}name".format(aixm))
-        # lon_lat = child.findall(".//{0}pos".format(gml))
-        # equipment = child.findall(".//{0}theNavaidEquipment".format(aixm))
 
         ident = aixm_keys(child, ('Navaid', 'timeSlice', 'NavaidTimeSlice', 'designator'))
         name = aixm_keys(child, ('Navaid', 'timeSlice', 'NavaidTimeSlice', 'name'))
@@ -290,10 +299,46 @@ def populate_navaids(filename):
         n.save()
 
 
+def populate_fixes(filename):
+    #todo use class to reduce repetiion?
+    """Save relevant fix information to the database, from an AIXM xml file.
+    Uses AWY_AIXM.xml."""
+
+    from django.db import DataError
+
+    tree = ET.parse(os.path.join(DIR_RES, filename))
+    root = tree.getroot()
+
+    for child in root:
+        # Skip non-fix entries.
+        if child[0].tag != '{0}DesignatedPoint'.format(aixm):
+            continue
+
+        ident = aixm_keys(child, ('DesignatedPoint', 'timeSlice', 'DesignatedPointTimeSlice', 'name'))
+        lon_lat = child.findall("./{0}DesignatedPoint/{0}timeSlice/{0}DesignatedPointTimeSlice/{0}location/{0}Point/{1}pos".format(aixm, gml))
+
+
+        # Not sure what's triggering this.
+        try:
+            ident = ident[0].text
+            lat, lon = parse_lon_lat(lon_lat)
+        except IndexError:
+            continue
+
+        f = Fix(ident=ident, lat=lat, lon=lon)
+
+        # Excludes oddballs like 'US Mexican Border.'
+        try:
+            f.save()
+        except DataError:
+            pass
+
+
 def populate_all():
     populate_navaids('NAV_AIXM.xml')
     populate_airfields('APT_AIXM.xml')
     populate_runways('APT_AIXM.xml')
+    populate_fixes('AWY_AIXM.xml')
 
 
 def download_data():

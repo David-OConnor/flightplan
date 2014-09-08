@@ -1,20 +1,9 @@
 from django.db import models
 
-
-class Navaid(models.Model):
-    ident = models.CharField(max_length=6, primary_key=True)
-    name = models.CharField(max_length=100)
-    components = models.CharField(max_length=500)  # ie ['NDB', 'VOR', 'DME']
-    lat = models.FloatField()
-    lon = models.FloatField()
-    #tac_freq = models.CharField()
-
-    def __str__(self):
-        return self.ident
-
+#todo sort out the extra char airfields and navaids. Sould always be len 4, 3 repsectively
 
 class Airfield(models.Model):
-    ident = models.CharField(max_length=6, primary_key=True)
+    ident = models.CharField(max_length=5, primary_key=True)
     # The AIXM unique identifier, used for tieing runways to airfields.
     aixm_id = models.CharField(max_length=30)
     name = models.CharField(max_length=100)
@@ -36,6 +25,27 @@ class Runway(models.Model):
 
     def __str__(self):
         return str(self.airfield) + ' ' + self.number
+
+
+class Navaid(models.Model):
+    ident = models.CharField(max_length=4, primary_key=True)
+    name = models.CharField(max_length=100)
+    components = models.CharField(max_length=500)  # ie ['NDB', 'VOR', 'DME']
+    lat = models.FloatField()
+    lon = models.FloatField()
+    #tac_freq = models.CharField()
+
+    def __str__(self):
+        return self.ident
+
+
+class Fix(models.Model):
+    ident = models.CharField(max_length=5, primary_key=True)
+    lat = models.FloatField()
+    lon = models.FloatField()
+
+    def __str__(self):
+        return self.ident
 
 
 class Services(models.Model):

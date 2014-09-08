@@ -106,7 +106,7 @@ def find_diverts(flight_path: list, max_dist: int, min_rwy_len: int) -> list:
         navaid = Navaid.objects.get(ident=ident.upper())
         path_points.append((navaid.lat, navaid.lon))
 
-    passed_rwy_len = Airfield.objects.filter(runway__length__gte=min_rwy_len)
+    passed_rwy_len = Airfield.objects.filter(runway__length__gte=min_rwy_len).distinct()
 
     result = []
 
@@ -114,11 +114,9 @@ def find_diverts(flight_path: list, max_dist: int, min_rwy_len: int) -> list:
         airfield_point = (airfield.lat, airfield.lon)
         if path_point_proximity(path_points, airfield_point, max_dist):
             result.append(airfield)
-            print(airfield.name, "point")
             continue
 
         if leg_proximity(path_points, airfield_point, max_dist):
-            print(airfield.name, "leg")
             result.append(airfield)
 
     return result

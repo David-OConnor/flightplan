@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+
+{% load staticfiles %}
+
+<html>
+    <head>
+        <!--[if lt IE 9]>
+            <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+        <![endif]-->
+        <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+        <link rel="stylesheet" type="text/css" href="{% static 'style.css' %}">
+        <style type="text/css">
+            html { height: 100% }
+            body { height: 100%; margin: 0; padding: 0 }
+
+
+{#            todo reference and remove some to style.css ??#}
+
+            #map-canvas {
+                height: {{ height }};
+                width: {{ width }};
+{#                position: absolute;#}
+            }
+
+            /* Ovverrides the one in styles.css */
+            input[type='text'] {
+                padding: 0;
+                width: 110px;
+            }
+
+
+        </style>
+
+        {#  Content that goes above the  Gmaps window. #}
+        {% block header %}
+        {% endblock %}
+
+        <script type="text/javascript"
+            src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCLwEHrYRO-E-_FUekZV0GGq5syiWXstpI&sensor=false">
+        </script>
+
+        {# Load variables from a generic views.py into the global JS namespace.#}
+        <script type="text/javascript">
+            var ctr = {{ center }}
+            var center = new google.maps.LatLng(ctr[0], ctr[1])
+            var zoom = {{ zoom }}
+            var mapTypeId = google.maps.MapTypeId.{{ chart_type }}
+        </script>
+
+        {#  Load generic drawing functions #}
+        <script type="text/javascript" src="{% static 'gmaps.js' %}"></script>
+
+        {#  Load app-specific variables and drawing functions #}
+        {% block app_drawing %}
+        {% endblock %}
+
+        <script src="{% static 'jquery-1.11.1.min.js' %}"></script>
+
+        <script type="text/javascript">
+            function init() {
+                initialize()
+                initializeAppSpecific()
+            }
+            google.maps.event.addDomListener(window, 'load', init)
+        </script>
+
+
+        <style>
+            .customBox {
+                position: absolute;
+            }
+        </style>
+
+    </head>
+    <body>
+
+        <div id="map-canvas"></div>
+
+        {%  block footer %}
+        {%  endblock %}
+
+    </body>
+</html>

@@ -1,0 +1,18 @@
+{% load staticfiles %}
+<!DOCTYPE html>
+
+<html>
+    <head>
+        <title>Diverts</title>
+    </head>
+
+
+    <body>
+        <div id="main">
+            {% for divert in divert_fields %}
+                <p>{{ divert }}</p>
+            {% endfor %}
+        </div>
+
+    </body>
+</html>

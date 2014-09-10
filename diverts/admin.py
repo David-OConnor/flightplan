@@ -4,12 +4,12 @@ from diverts.models import Airfield, Runway, Navaid, Fix
 
 
 class AirfieldAdmin(admin.ModelAdmin):
-    list_display = ('ident', 'name', 'lat', 'lon')
+    list_display = ('ident', 'icao', 'name', 'lat', 'lon')
     search_fields = ['ident']
 
 
 class RunwayAdmin(admin.ModelAdmin):
-    list_display = ('airfield', 'number', 'length', 'width')
+    list_display = ('airfield', 'surface', 'number', 'length', 'width')
     search_fields = ['airfield__ident']
 
 

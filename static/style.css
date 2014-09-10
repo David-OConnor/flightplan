@@ -1,0 +1,101 @@
+.navbar {
+    float: left;
+    width: 155px;
+    height: 1000px;
+    border-right: 4px solid;
+    margin-right: 30px;
+    background-color: #C2D1FF;
+}
+
+.navbutton {
+    height: 75px;
+    background-color: #5BA2F7;
+    font-size: 22px;
+    color: #FFFFFF;
+    text-align: center;
+    text-decoration:none;
+    margin: 15px;
+    border-radius: 15px;
+    line-height: 65px;
+    opacity: .8;
+
+    /* IE8 compatibility */
+    -ms-filter: "progid:DXImageTransform.Microsoft.Alpha(Opacity=80)";
+}
+
+/* For multi-line text centering on nav buttons. */
+span {
+  display: inline-block;
+  vertical-align: middle;
+  line-height: normal;
+}
+
+div.navbar a {
+    text-decoration: none;
+}
+
+#main {
+    width: 600px;
+    display: inline-block;
+}
+
+li {
+    margin-bottom: 5pt;
+}
+
+.instructions {
+    background-color: #F0F0F0;
+    padding: 4px;
+    border-radius: 10px;
+}
+
+.lowfly-form {
+    background-color: #FFCC99;
+    padding-left: 25px;
+    border-radius: 10px;
+    margin-top: 50px;
+}
+
+#target-form {
+    display: inline-block;
+    background-color: #FFCC99;
+    padding: 25px;
+    border-radius: 10px;
+    margin-bottom: 50px;
+}
+
+input[type='text'], input[type='password'] {
+    padding: 5px;
+}
+
+label {
+    width: 160px;
+    float: left;
+}
+
+
+
+/* Gmaps-view content below */
+
+/* ie8 compatibility */
+legend {
+    color: white;
+}
+
+fieldset {
+    float: left;
+    height: 34px;
+}
+
+#settings-header {
+    display: inline-block;
+    position: absolute;
+    color: white;
+    z-index: 1;
+}
+
+#hide-button {
+    position: relative;
+    float: left;
+    margin: 12px;
+}

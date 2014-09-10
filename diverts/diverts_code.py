@@ -4,6 +4,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 import requests
+from django.db.models import Q
+from django.db import DataError
 
 from diverts.models import Airfield, Runway, Navaid, Fix
 
@@ -98,28 +100,69 @@ def find_dist(point0: (float, float), point1: (float, float)):
     return r * c
 
 
-def find_diverts(flight_path: list, max_dist: int, min_rwy_len: int) -> list:
-    """Find divert airfields within a certain distance of the flight path that meet
-    certain criteria, like min runway length."""
-
-    #Todo add the k etc for airfield
+def flight_path_js(flight_path):
+    #todo use this to save repetative queries somehow with find_diverts?
+    #todo route the reuslt thorugh views.py to only call this once?
+    #todo this is straight up duplication of find_diverts first part.
     path_points = []
     for ident in flight_path:
-        if len(ident) == 3:
-            pt = Navaid.objects.get(ident=ident.upper())
-        elif len(ident) == 4:
-            pt = Airfield.objects.get(ident=ident.upper())
-        elif len(ident) == 5:
-            pt = Fix.objects.get(ident=ident.upper())
+        if len(ident) == 5:  # Fixes always have 5 characters. No others do.
+            pt = Fix.objects.filter(ident=ident.upper())
         else:
-            raise TypeError('Steer point has too few or too many characters.')
+            pt = Navaid.objects.filter(ident=ident.upper())
+            if not pt:
+                pt = Airfield.objects.filter(icao=ident.upper())
+                if not pt:
+                    pt = Airfield.objects.filter(ident=ident.upper())
+
+        if not pt or len(pt) != 1:
+            return
+        pt = pt[0]
+
+        try:
+            ident = pt.icao
+        except AttributeError:
+            ident = pt.ident
+
+        path_points.append([pt.lat, pt.lon, ident])
+    return path_points
+
+
+def find_diverts(flight_path: list, max_dist, min_rwy_len, min_rwy_width, paved_only) -> list:
+    """Find divert airfields within a certain distance of the flight path that meet
+    certain criteria, like min runway length."""
+    path_points = []
+    for ident in flight_path:
+        # todo perhaps clean up this nest.
+        if len(ident) == 5:  # Fixes always have 5 characters. No others do.
+            pt = Fix.objects.filter(ident=ident.upper())
+        else:
+            pt = Navaid.objects.filter(ident=ident.upper())
+            if not pt:
+                pt = Airfield.objects.filter(icao=ident.upper())
+                if not pt:
+                    pt = Airfield.objects.filter(ident=ident.upper())
+
+        if not pt or len(pt) != 1:
+            return
+        pt = pt[0]
 
         path_points.append((pt.lat, pt.lon))
 
-    passed_rwy_len = Airfield.objects.filter(runway__length__gte=min_rwy_len).distinct()
+    if paved_only:
+        surface = Q(runway__surface='ASPH') | Q(runway__surface='CONC') | Q(runway__surface='OTHER')
+    else:
+        surface = ~Q(runway__surface='BARF')  # todo place holder
+        # surface = Q(runway__surface='WATER')  # todo place holder
+
+    # filters = {'runway__length__gte': min_rwy_len, 'runway__width__gte': min_rwy_width}
+
+    # passed_rwy_len = Airfield.objects.filter(*surface, **filters).distinct()
+
+    passed_rwy_len = Airfield.objects.filter(surface, runway__length__gte=min_rwy_len,
+                                             runway__width__gte=min_rwy_width).distinct()
 
     result = []
-    print("TEST")
     for airfield in passed_rwy_len:
         airfield_point = (airfield.lat, airfield.lon)
         #this bit shouldn't be necessary, as leg proximity includes it. Still sometimes coming ssort.
@@ -191,17 +234,22 @@ def populate_airfields(filename):
     for child in root:
         if child[0].tag == '{0}AirportHeliport'.format(aixm):
             ident = aixm_keys(child, ('AirportHeliport', 'timeSlice', 'AirportHeliportTimeSlice', 'designator'))
+            icao = aixm_keys(child, ('AirportHeliport', 'timeSlice', 'AirportHeliportTimeSlice', 'locationIndicatorICAO'))
             name = aixm_keys(child, ('AirportHeliport', 'timeSlice', 'AirportHeliportTimeSlice', 'name'))
             lon_lat = child.findall("./{0}AirportHeliport/{0}timeSlice/{0}AirportHeliportTimeSlice/{0}ARP/{0}ElevatedPoint/{1}pos".format(aixm, gml))
             aixm_id = aixm_keys(child, ('AirportHeliport',))
 
             ident = ident[0].text
+            try:  # Many smaller airfields don't have ICAO codes.
+                icao = icao[0].text
+            except IndexError:
+                icao = ''
             name = name[0].text
             aixm_id = list(aixm_id[0].attrib.values())[0]
 
             lat, lon = parse_lon_lat(lon_lat)
 
-            a = Airfield(ident=ident, name=name, aixm_id=aixm_id, lat=lat, lon=lon)
+            a = Airfield(ident=ident, icao=icao, name=name, aixm_id=aixm_id, lat=lat, lon=lon)
             a.save()
 
 
@@ -221,6 +269,7 @@ def populate_runways(filename):
             number = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'designator'))
             length = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'lengthStrip'))
             width = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'widthStrip'))
+            surface = aixm_keys(child, ('Runway', 'timeSlice', 'RunwayTimeSlice', 'surfaceProperties', 'SurfaceCharacteristics', 'composition'))
 
             # Parses a dict with one k/v. We only care about the v.
             # airfield_id is the internal AIXM id, ie 'AH_0000001'. airfield_ident
@@ -228,13 +277,13 @@ def populate_runways(filename):
             aixm_id = list(aixm_id[0].attrib.values())[0]
             aixm_id = aixm_id.split("'")[1]
 
-            #todo this is the only line that makes it slow!
-            # airfield_elem = root.findall("./{3}Member/{0}AirportHeliport[@{1}id='{2}']".format(aixm, gml, aixm_id, faa))
-
-            # airfield_ident = airfield_elem[0].findall(".//{0}designator".format(aixm))[0].text
             airfield = Airfield.objects.get(aixm_id=aixm_id)
 
             number = number[0].text
+            try:
+                surface = surface[0].text
+            except IndexError:  #todo figure out what this means
+                surface = 'debug error'
 
             # Ruways show as '5/23', then separate entries for 5 and
             # 23. Only the'5/23' entry has length and width
@@ -244,7 +293,7 @@ def populate_runways(filename):
             except IndexError:
                 continue
 
-            r = Runway(airfield=airfield, number=number, length=length, width=width)
+            r = Runway(airfield=airfield, number=number, length=length, width=width, surface=surface)
             r.save()
 
 
@@ -296,15 +345,16 @@ def populate_navaids(filename):
         lat, lon = parse_lon_lat(lon_lat)
 
         n = Navaid(ident=ident, name=name, components=comps, lat=lat, lon=lon)
-        n.save()
+        try:
+            n.save()
+        except DataError:  # A single navaid, 'POE1', triggers this.
+            pass
 
 
 def populate_fixes(filename):
     #todo use class to reduce repetiion?
     """Save relevant fix information to the database, from an AIXM xml file.
     Uses AWY_AIXM.xml."""
-
-    from django.db import DataError
 
     tree = ET.parse(os.path.join(DIR_RES, filename))
     root = tree.getroot()
@@ -318,7 +368,7 @@ def populate_fixes(filename):
         lon_lat = child.findall("./{0}DesignatedPoint/{0}timeSlice/{0}DesignatedPointTimeSlice/{0}location/{0}Point/{1}pos".format(aixm, gml))
 
 
-        # Not sure what's triggering this.
+        # todo Not sure what's triggering this.
         try:
             ident = ident[0].text
             lat, lon = parse_lon_lat(lon_lat)
@@ -336,9 +386,9 @@ def populate_fixes(filename):
 
 def populate_all():
     populate_navaids('NAV_AIXM.xml')
+    populate_fixes('AWY_AIXM.xml')
     populate_airfields('APT_AIXM.xml')
     populate_runways('APT_AIXM.xml')
-    populate_fixes('AWY_AIXM.xml')
 
 
 def download_data():

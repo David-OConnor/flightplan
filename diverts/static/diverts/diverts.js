@@ -13,7 +13,7 @@ function initializeAppSpecific() {
         pts.push([flightPath[i][0], flightPath[i][1]])
     }
 
-    drawLine(pts, '#3333CC', 6, 0.8, false, map)
+    drawLine(pts, '#3333CC', 6, 0.8, false, map, false)
 
     for (var i=0; i < divertFields.length; i++) {
         var divert =  divertFields[i]

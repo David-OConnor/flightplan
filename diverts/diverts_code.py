@@ -1,5 +1,6 @@
 from math import sin, asin, cos, acos, atan2, sqrt, radians, pi
 import os
+import re
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -7,6 +8,7 @@ import requests
 from django.db.models import Q
 from django.db import DataError
 
+import flightplan.shared_funcs as sf
 from diverts.models import Airfield, Runway, Navaid, Fix
 
 
@@ -24,95 +26,45 @@ faa = '{http://www.faa.gov/aixm5.1}'  # set these dynamically
 
 #todo clean up repetatively calculating earth's radius
 
-def ellipsoid_radius(f):
-    # todo add this to shared_funcs
-    #todo make shared_funcs its own module called geodesic
-    #todo in shared funcs, switch to NM or nmi.
-    # This doesn't quite match with Wolfram Alpha's results, but is closer
-    # than using an average radius.
-    # f is geodetic latitude, in degrees
-    f = radians(f)
-    a = 6378137.0  # m, per WGS84
-    b = 6356752.31424518  # m, per WGS84
-    #1/f = 298.257223563
-
-    NM_per_m = .000539956803
-    a, b = a * NM_per_m, b * NM_per_m
-
-    return sqrt(((a**2 * cos(f))**2 + (b**2 * sin(f))**2) / ((a * cos(f))**2 + (b * sin(f))**2))
-
-
-def find_brg(point0, point1):
-    #todo copy+pasted from shared_funcs.py
-    #todo: in shared_funcs.py, changed from a list to two separate args, like this is now.
-    #todo ie replace it with this.
-    """Find the bearing, in radians, between two points."""
-    lat0 = radians(point0[0])
-    lon0 = radians(point0[1])
-    lat1 = radians(point1[0])
-    lon1 = radians(point1[1])
-    d_lon = lon1 - lon0
-
-    brg = atan2(sin(d_lon)*cos(lat1), cos(lat0)*sin(lat1) - sin(lat0)*cos(lat1)*cos(d_lon))
-    return (brg + tau) % tau
-
-
-def cross_track_dist(point0: (float, float), point1: (float, float), third_point: (float, float)):
-    #todo comment and clean this function.
-    r = ellipsoid_radius(third_point[0])
-
-    dist_start_third = find_dist(point0, third_point)
-    dist_end_third = find_dist(point1, third_point)
-    dist_start_end = find_dist(point0, point1)
-
-    angular_start_third = (dist_start_third / (tau*r)) * tau
-    angular_end_third = (dist_end_third / (tau*r)) * tau
-
-    brg_start_third = find_brg(point0, third_point)
-    brg_start_end = find_brg(point0, point1)
-
-    cross_track = asin(sin(angular_start_third) * sin(brg_start_third - brg_start_end)) * r
-    ang_ct = (cross_track / (tau*r)) * tau
-
-    at_start = acos(cos(angular_start_third) / cos(ang_ct)) * r
-    # print(ang_ct, angular_end_third, r, "TEST")
-    print(angular_end_third, ang_ct)
-    try:
-        at_end = acos(cos(angular_end_third) / cos(ang_ct)) * r
-    # Likely due to floating point errors, where acos is using a number just below -1.
-    # acos only works between -1 and 1.  acos(-1) = tau/2
-    except ValueError:  # todo test if  you need this. was coming up with 8xs8 as an airfield.
-        at_end = tau/2
-
-    if at_start > dist_start_end:
-        cross_track = find_dist(point1, third_point)
-    elif at_end > dist_start_end:
-        cross_track = find_dist(point0, third_point)
-
-    return abs(cross_track)
-
-
-def find_dist(point0: (float, float), point1: (float, float)):
-    """Calculate the distance between two lat-lons, in nm.  Inputs are in degrees."""
-    # todo add this to squadron's shared_funcs.py.
-    lat0, lon0 = radians(point0[0]), radians(point0[1])
-    lat1, lon1 = radians(point1[0]), radians(point1[1])
-    r = ellipsoid_radius(lat0)
-
-    dlon = lon1 - lon0
-    dlat = lat1 - lat0
-
-    a = (sin(dlat/2)) ** 2 + cos(lat0) * cos(lat1) * (sin(dlon/2)) ** 2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    return r * c
-
 
 def flight_path_js(flight_path):
     #todo use this to save repetative queries somehow with find_diverts?
     #todo route the reuslt thorugh views.py to only call this once?
     #todo this is straight up duplication of find_diverts first part.
-    path_points = []
+    path_points = flight_path_from_idents(flight_path)
+
+    simple_path_points = []
+    for pt in path_points:
+        try:
+            # Uses ident if pt is an airfield with no icao.
+            ident = pt.icao if pt.icao else pt.ident
+        except AttributeError:  # pt is not an airfield; it's a navaid or fix.
+            ident = pt.ident
+
+        simple_path_points.append([pt.lat, pt.lon, ident])
+    return simple_path_points
+
+
+class BrgDistFix:
+    """To use in place of a Model instance for points defined by a navaid,
+    bearing and distance."""
+    def __init__(self, navaid_ident, navaid_pt, brg, dist):
+        self.ident = navaid_ident + ' ' + str(brg) + '/' + str(dist)
+        self.navaid_pt = navaid_pt
+        self.brg = brg
+        self.dist = dist
+
+        self.brg = radians(self.brg)
+        self.fix_pt = sf.find_pt(self.navaid_pt, self.dist, self.brg)
+        self.lat = self.fix_pt[0]
+        self.lon = self.fix_pt[1]
+
+
+def flight_path_from_idents(flight_path):
+    steer_points = []  # Contains model instances.
     for entered_ident in flight_path:
+        pt = []
+        # todo perhaps clean up this nest.
         if len(entered_ident) == 5:  # Fixes always have 5 characters. No others do.
             pt = Fix.objects.filter(ident=entered_ident.upper())
         else:
@@ -123,44 +75,38 @@ def flight_path_js(flight_path):
                     pt = Airfield.objects.filter(ident=entered_ident.upper())
 
         if not pt or len(pt) != 1:
-            return
-        pt = pt[0]
+            match = re.match(r'([A-Z]{3})(\d{1,3})[/\\](\d{1,3})', entered_ident)
+            if match:
+                navaid_ident, brg, dist = match.groups()
+                try:
+                    navaid = Navaid.objects.get(ident=navaid_ident)
+                except Navaid.DoesNotExist:
+                    return
+                navaid_pt = navaid.lat, navaid.lon
+                brg, dist = float(brg), float(dist)
+                fix = BrgDistFix(navaid_ident, navaid_pt, brg, dist)
+            else:
+                return
 
+        print(pt, "PT")
         try:
-            # Uses ident if pt is an airfield with no icao.
-            ident = pt.icao if pt.icao else pt.ident
-        except AttributeError:  # pt is not an airfield; it's a navaid or fix.
-            ident = pt.ident
+            pt = pt[0]
+        except (IndexError):  # Indicates a brg/dist fix.
+            pt = fix  #todo THis is probably not a good way to do it.
 
-        path_points.append([pt.lat, pt.lon, ident])
-    return path_points
+        steer_points.append(pt)
+    return steer_points
 
 
 def find_diverts(flight_path: list, max_dist, min_rwy_len, min_rwy_width, paved_only) -> list:
     """Find divert airfields within a certain distance of the flight path that meet
     certain criteria, like min runway length."""
-    path_points = []
-    for ident in flight_path:
-        # todo perhaps clean up this nest.
-        if len(ident) == 5:  # Fixes always have 5 characters. No others do.
-            pt = Fix.objects.filter(ident=ident.upper())
-        else:
-            pt = Navaid.objects.filter(ident=ident.upper())
-            if not pt:
-                pt = Airfield.objects.filter(icao=ident.upper())
-                if not pt:
-                    pt = Airfield.objects.filter(ident=ident.upper())
-
-        if not pt or len(pt) != 1:
-            return
-        pt = pt[0]
-
-        path_points.append((pt.lat, pt.lon))
+    path_points = flight_path_from_idents(flight_path)
 
     if paved_only:
         surface = Q(runway__surface='ASPH') | Q(runway__surface='CONC') | Q(runway__surface='OTHER')
     else:
-        surface = ~Q(runway__surface='BARF')  # todo place holder
+        surface = ~Q(runway__surface='Unicorn poop')  # todo place holder
 
     passed_rwy_len = Airfield.objects.filter(surface, runway__length__gte=min_rwy_len,
                                              runway__width__gte=min_rwy_width).distinct()
@@ -168,7 +114,8 @@ def find_diverts(flight_path: list, max_dist, min_rwy_len, min_rwy_width, paved_
     result = []
     for airfield in passed_rwy_len:
         airfield_point = (airfield.lat, airfield.lon)
-        #this bit shouldn't be necessary, as leg proximity includes it. Still sometimes coming ssort.
+        #this bit shouldn't be necessary, as leg proximity includes it.
+        # Still sometimes coming missing one without it. todo investigate.
         if path_point_proximity(path_points, airfield_point, max_dist):
             result.append(airfield)
             continue
@@ -178,18 +125,22 @@ def find_diverts(flight_path: list, max_dist, min_rwy_len, min_rwy_width, paved_
 
     return result
 
-
+#todo stop calling model entries points please.
 def path_point_proximity(path_points, airfield_point, max_dist):
-    for path_point in path_points:
-        if find_dist(path_point, airfield_point) <= max_dist:
+    for steer_point in path_points:
+        lat_lon = steer_point.lat, steer_point.lon
+        if sf.find_dist(lat_lon, airfield_point) <= max_dist:
             return True
     return False
 
 
 def leg_proximity(path_points, airfield_point, max_dist):
-    legs = find_legs(path_points)
+
+    pts = [(pt.lat, pt.lon) for pt in path_points]
+
+    legs = find_legs(pts)
     for leg in legs:
-        if cross_track_dist(leg[0], leg[1], airfield_point) <= max_dist:
+        if sf.cross_track_dist(leg[0], leg[1], airfield_point) <= max_dist:
             return True
     return False
 

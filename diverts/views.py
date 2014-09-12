@@ -41,7 +41,7 @@ def index(request):
 
             'center': center,  #todo find a smart algorithm/copy from royals
             'chart_type': 'TERRAIN',
-            'zoom': 14,
+            'zoom': 9,
             'width': '100%',
             'height': '100%',
 

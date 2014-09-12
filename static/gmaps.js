@@ -57,14 +57,15 @@ if(typeof(close)==='undefined') close = false;
 }
 
 
-function drawLine(pts, color, weight, opacity, close, map) {
+function drawLine(pts, color, weight, opacity, close, map, draggable) {
+    if(typeof(draggable)==='undefined')draggable = true
     return new google.maps.Polyline({
         path: makePath(pts, close),
         geodesic: true,
         strokeColor: color,
         strokeOpacity: opacity,
         strokeWeight: weight,
-        draggable: true,
+        draggable: draggable,
         map: map
     })
 }

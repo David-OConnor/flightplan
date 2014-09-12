@@ -14,7 +14,7 @@ class Airfield(models.Model):
     lon = models.FloatField()
 
     def __str__(self):
-        return self.ident + self.name
+        return ', '.join([self.ident, self.name])
     
     #services = models.CharField(max_length=500)
 
@@ -29,7 +29,7 @@ class Runway(models.Model):
     surface = models.CharField(max_length=30)
 
     def __str__(self):
-        return str(self.airfield) + ' ' + self.number
+        return ', '.join([str(self.airfield), self.number])
 
 
 class Navaid(models.Model):

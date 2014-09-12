@@ -6,11 +6,9 @@
 {%  endblock %}
 
 {% block app_drawing %}
-<script type="text/javacript"> // todo why are these here instead of in the js file?
-    console.log("HI MATES")
+<script type="text/javascript">
     var flightPath = {{ flight_path|safe }} // test if you need safe for this and the line below.
-    var divert_fields = {{ divert_fields_js|safe }}
-    console.log("flight path")
+    var divertFields = {{ divert_fields_js|safe }}
 </script>
 
 <script type="text/javascript" src="{% static 'diverts/diverts.js' %}"></script>

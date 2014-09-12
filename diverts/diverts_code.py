@@ -75,7 +75,14 @@ def cross_track_dist(point0: (float, float), point1: (float, float), third_point
     ang_ct = (cross_track / (tau*r)) * tau
 
     at_start = acos(cos(angular_start_third) / cos(ang_ct)) * r
-    at_end = acos(cos(angular_end_third) / cos(ang_ct)) * r
+    # print(ang_ct, angular_end_third, r, "TEST")
+    print(angular_end_third, ang_ct)
+    try:
+        at_end = acos(cos(angular_end_third) / cos(ang_ct)) * r
+    # Likely due to floating point errors, where acos is using a number just below -1.
+    # acos only works between -1 and 1.  acos(-1) = tau/2
+    except ValueError:  # todo test if  you need this. was coming up with 8xs8 as an airfield.
+        at_end = tau/2
 
     if at_start > dist_start_end:
         cross_track = find_dist(point1, third_point)
@@ -105,23 +112,24 @@ def flight_path_js(flight_path):
     #todo route the reuslt thorugh views.py to only call this once?
     #todo this is straight up duplication of find_diverts first part.
     path_points = []
-    for ident in flight_path:
-        if len(ident) == 5:  # Fixes always have 5 characters. No others do.
-            pt = Fix.objects.filter(ident=ident.upper())
+    for entered_ident in flight_path:
+        if len(entered_ident) == 5:  # Fixes always have 5 characters. No others do.
+            pt = Fix.objects.filter(ident=entered_ident.upper())
         else:
-            pt = Navaid.objects.filter(ident=ident.upper())
+            pt = Navaid.objects.filter(ident=entered_ident.upper())
             if not pt:
-                pt = Airfield.objects.filter(icao=ident.upper())
+                pt = Airfield.objects.filter(icao=entered_ident.upper())
                 if not pt:
-                    pt = Airfield.objects.filter(ident=ident.upper())
+                    pt = Airfield.objects.filter(ident=entered_ident.upper())
 
         if not pt or len(pt) != 1:
             return
         pt = pt[0]
 
         try:
-            ident = pt.icao
-        except AttributeError:
+            # Uses ident if pt is an airfield with no icao.
+            ident = pt.icao if pt.icao else pt.ident
+        except AttributeError:  # pt is not an airfield; it's a navaid or fix.
             ident = pt.ident
 
         path_points.append([pt.lat, pt.lon, ident])
@@ -153,11 +161,6 @@ def find_diverts(flight_path: list, max_dist, min_rwy_len, min_rwy_width, paved_
         surface = Q(runway__surface='ASPH') | Q(runway__surface='CONC') | Q(runway__surface='OTHER')
     else:
         surface = ~Q(runway__surface='BARF')  # todo place holder
-        # surface = Q(runway__surface='WATER')  # todo place holder
-
-    # filters = {'runway__length__gte': min_rwy_len, 'runway__width__gte': min_rwy_width}
-
-    # passed_rwy_len = Airfield.objects.filter(*surface, **filters).distinct()
 
     passed_rwy_len = Airfield.objects.filter(surface, runway__length__gte=min_rwy_len,
                                              runway__width__gte=min_rwy_width).distinct()

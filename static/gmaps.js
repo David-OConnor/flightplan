@@ -86,11 +86,12 @@ function drawPolygon(pts, color, weight, opacity, f_color, f_opacity, map) {
 
 
 function drawMarker(pos, hdg, color, weight, opacity, filled, path, map, draggable) {
+    // pos is a goog LL, which differs from the behavior of functions using makePath().
     if(typeof(draggable)==='undefined')draggable = true
     var fillOpacity = 0
     if (filled === true)fillOpacity = 1
 
-    var myArrow = {
+    var Icon = {
         path: path,
         strokeColor: color,
         strokeWeight: weight,
@@ -102,7 +103,7 @@ function drawMarker(pos, hdg, color, weight, opacity, filled, path, map, draggab
 
     return new google.maps.Marker({
         position: pos,
-        icon: myArrow,
+        icon: Icon,
         map: map,
         draggable: draggable
     })

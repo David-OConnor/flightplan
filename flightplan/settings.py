@@ -14,7 +14,6 @@ import dj_database_url
 import os
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.6/howto/deployment/checklist/
 
@@ -27,7 +26,7 @@ ON_HEROKU = True if 'DATABASE_URL' in os.environ else False
 DEBUG = False if ON_HEROKU else True
 TEMPLATE_DEBUG = DEBUG
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'diverts.herokuapp.com']
 
 
 # Application definition
@@ -61,7 +60,7 @@ WSGI_APPLICATION = 'flightplan.wsgi.application'
 # https://docs.djangoproject.com/en/1.7/ref/settings/#databases
 # This if/else prevents loading the .gitignored private file if on Heroku.
 
-LOCAL_DB = 'postgres://postgres:test@localhost:5432/flightplan'
+LOCAL_DB = 'postgres://postgres:test@localhost:5433/flightplan'
 DATABASES = {'default': dj_database_url.config(default=LOCAL_DB)}
 
 # For connecting to Heroku's database from a local machine.

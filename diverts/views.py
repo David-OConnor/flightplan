@@ -1,5 +1,5 @@
 from django.http import HttpResponse
-from django.shortcuts import render, render_to_response
+from django.shortcuts import render
 
 from diverts import diverts_code
 from diverts.forms import DivertForm
@@ -25,11 +25,12 @@ def index(request):
         if not divert_fields:
             return HttpResponse("<h2>One of the flight plan points was invalid - try again.</h2>")
 
-
         flight_path_js = diverts_code.flight_path_js(flight_path)
-        # todo add icao logic instead of ident, like in flight path. Probably ahve to
-        # skip the comprehension for this.
-        divert_fields_js = [[divert.lat, divert.lon, divert.ident] for divert in divert_fields]
+
+        divert_fields_js = []
+        for divert in divert_fields:
+            ident = divert.icao if divert.icao else divert.ident
+            divert_fields_js.append([divert.lat, divert.lon, ident])
 
         center = [flight_path_js[0][0], flight_path_js[0][1]]
 
